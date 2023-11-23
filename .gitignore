@@ -1,2 +1,6 @@
 data
 __pycache__
+*.pt
+history.json
+
+.DS_Store

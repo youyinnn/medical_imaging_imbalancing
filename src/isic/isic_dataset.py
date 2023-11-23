@@ -6,6 +6,37 @@ from torch.utils.data import Dataset
 from torchvision.io import read_image
 import torchvision.transforms as transforms
 
+from urllib import request
+from zipfile import ZipFile
+from tqdm import tqdm
+
+
+class DownloadProgressBar(tqdm):
+    def update_to(self, b=1, bsize=1, tsize=None):
+        if tsize is not None:
+            self.total = tsize
+        self.update(b * bsize - self.n)
+
+
+def remove(path):
+    try:
+        os.remove(path)
+    except Exception as e:
+        print(f"Fire: {path} might be removed already")
+
+
+def download_and_extract(dest_dir, url, base_dir):
+    if not os.path.isdir(dest_dir):
+        data_zip = os.path.join(base_dir, 'tmp.zip')
+        print(f'Start downloading from: {url}')
+        with DownloadProgressBar(unit='B', unit_scale=True,
+                                 miniters=1, desc=url.split('/')[-1]) as t:
+            request.urlretrieve(url, filename=data_zip, reporthook=t.update_to)
+
+        with ZipFile(data_zip, 'r') as zip_f:
+            zip_f.extractall(base_dir)
+        remove(data_zip)
+
 
 class ISIC_2018(Dataset):
 
@@ -15,13 +46,44 @@ class ISIC_2018(Dataset):
                  ):
 
         if split.lower().startswith('train'):
-            img_dir = os.path.join(base_dir, 'ISIC2018_Task3_Training_Input')
+            training_input_dir = os.path.join(
+                base_dir, 'ISIC2018_Task3_Training_Input',)
+            download_and_extract(
+                training_input_dir,
+                'https://isic-challenge-data.s3.amazonaws.com/2018/ISIC2018_Task3_Training_Input.zip',
+                base_dir
+            )
+
+            training_gt_dir = os.path.join(
+                base_dir, 'ISIC2018_Task3_Training_GroundTruth',)
+            download_and_extract(
+                training_gt_dir,
+                'https://isic-challenge-data.s3.amazonaws.com/2018/ISIC2018_Task3_Training_GroundTruth.zip',
+                base_dir
+            )
+            img_dir = training_input_dir
             annotations_file = os.path.join(
-                base_dir, 'ISIC2018_Task3_Training_GroundTruth', 'ISIC2018_Task3_Training_GroundTruth.csv')
+                training_gt_dir, 'ISIC2018_Task3_Training_GroundTruth.csv')
+
         elif split.lower().startswith('val'):
-            img_dir = os.path.join(base_dir, 'ISIC2018_Task3_Validation_Input')
+            validation_input_dir = os.path.join(
+                base_dir, 'ISIC2018_Task3_Validation_Input',)
+            download_and_extract(
+                validation_input_dir,
+                'https://isic-challenge-data.s3.amazonaws.com/2018/ISIC2018_Task3_Validation_Input.zip',
+                base_dir
+            )
+
+            validation_gt_dir = os.path.join(
+                base_dir, 'ISIC2018_Task3_Validation_GroundTruth',)
+            download_and_extract(
+                validation_gt_dir,
+                'https://isic-challenge-data.s3.amazonaws.com/2018/ISIC2018_Task3_Validation_GroundTruth.zip',
+                base_dir
+            )
+            img_dir = validation_input_dir
             annotations_file = os.path.join(
-                base_dir, 'ISIC2018_Task3_Validation_GroundTruth', 'ISIC2018_Task3_Validation_GroundTruth.csv')
+                validation_gt_dir, 'ISIC2018_Task3_Validation_GroundTruth.csv')
 
         self.img_labels = pd.read_csv(annotations_file)
         self.img_dir = img_dir
