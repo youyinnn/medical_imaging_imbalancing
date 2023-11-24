@@ -46,6 +46,9 @@ class ISIC_2018(Dataset):
                  size=(256, 256)
                  ):
 
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir, exist_ok=True)
+
         if split.lower().startswith('train'):
             training_input_dir = os.path.join(
                 base_dir, 'ISIC2018_Task3_Training_Input',)
