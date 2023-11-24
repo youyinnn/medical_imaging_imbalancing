@@ -1,6 +1,6 @@
 data
 __pycache__
 *.pt
-history.json
+weights
 
 .DS_Store

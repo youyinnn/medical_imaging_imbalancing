@@ -43,6 +43,7 @@ class ISIC_2018(Dataset):
     def __init__(self,
                  split: str = 'train',
                  base_dir='../../data/isic/2018',
+                 size=(256, 256)
                  ):
 
         if split.lower().startswith('train'):
@@ -91,7 +92,7 @@ class ISIC_2018(Dataset):
         self.mean_t = torch.tensor([0.485, 0.456, 0.406])
         self.std_t = torch.tensor([0.229, 0.224, 0.225])
         self.transform = transforms.Compose([
-            transforms.Resize((256, 256), antialias=True),
+            transforms.Resize(size, antialias=True),
             # transforms.ToTensor(),
             transforms.Normalize(mean=self.mean_t, std=self.std_t),
         ])
