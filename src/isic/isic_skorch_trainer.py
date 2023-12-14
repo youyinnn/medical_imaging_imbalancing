@@ -2,7 +2,10 @@ import json
 import os
 import sys
 import skorch
+import time
+import torch
 import torch.nn as nn
+import numpy as np
 import torch.optim as optim
 from skorch import NeuralNetClassifier
 from skorch.helper import predefined_split
@@ -17,6 +20,8 @@ from skorch.exceptions import SkorchException
 from skorch.utils import _check_f_arguments
 from skorch.utils import noop
 from skorch.utils import open_file_like
+from skorch.dataset import unpack_data
+from skorch.utils import to_tensor
 
 
 class MyCheckpoint(Callback):
@@ -219,9 +224,124 @@ class MyCheckpoint(Callback):
             self.sink(text)
 
 
+class ResetedSkorchLRScheduler(LRScheduler):
+
+    def __init__(self, checkpoint_monitor, lr_reset_monitor_list,
+                 max_iter, monitors_indicators=None,
+                 policy='WarmRestartLR', monitor='train_loss',
+                 event_name="event_lr", step_every='epoch', **kwargs):
+
+        self.checkpoint_monitor = checkpoint_monitor
+        self.lr_reset_monitor_list = lr_reset_monitor_list
+        # true if the higher the better
+        self.monitors_indicators = monitors_indicators
+        self.max_iter = max_iter
+        self.current_count = 0
+        self.resetor_name = str(time.time())
+        vars(self).update(kwargs)
+        super().__init__(policy, monitor, event_name, step_every, **kwargs)
+
+        higher_better = ['acc', 'f1', 'precision', 'recall', 'auc']
+        lower_better = ['loss']
+
+        if self.monitors_indicators is None:
+            self.monitors_indicators = []
+            for reset_monitor in lr_reset_monitor_list:
+                lower_ = any(lbm in reset_monitor for lbm in lower_better)
+                higher_ = any(hbm in reset_monitor for hbm in higher_better)
+                indicator = lower_ ^ higher_
+                # if not show in both, then the higher the better as default
+                self.monitors_indicators.append(
+                    True if not indicator else higher_)
+
+    @property
+    def kwargs(self):
+        # These are the parameters that are passed to the
+        # scheduler. Parameters that don't belong there must be
+        # excluded.
+        excluded = (
+            'checkpoint_monitor', 'lr_reset_monitor_list',
+            'max_iter', 'monitors_indicators', 'current_count',
+            'resetor_name',
+            'policy', 'monitor', 'event_name', 'step_every'
+        )
+        kwargs = {key: val for key, val in vars(self).items()
+                  if not (key in excluded or key.endswith('_'))}
+        return kwargs
+
+    def not_improved(self, net: skorch.NeuralNet):
+        checkpoint_record_idx = int(np.argmax(
+            net.history[:, self.checkpoint_monitor]))
+        if len(net.history) > self.max_iter and len(net.history) > (checkpoint_record_idx + 1):
+            ckp_monitor_over_reset = net.history[checkpoint_record_idx,
+                                                 self.lr_reset_monitor_list]
+            last_monitor = net.history[-1, self.lr_reset_monitor_list]
+
+            decision = []
+            for i, monitors_indicator in enumerate(self.monitors_indicators):
+                rs = ckp_monitor_over_reset[i] >= last_monitor[i]
+                decision.append(rs if monitors_indicator else not rs)
+
+            return np.all(decision)
+        return False
+
+    def on_epoch_end(self, net: skorch.NeuralNet, **kwargs):
+        if self.not_improved(net):
+            self.current_count += 1
+        else:
+            self.current_count = 0
+
+        if len(net.history) > self.max_iter and self.current_count > 0:
+            net.history.record(f"event_not_imp_count", self.current_count)
+        else:
+            net.history.record(f"event_not_imp_count", '')
+
+        if self.current_count == self.max_iter:
+            old_step_count = self.lr_scheduler_._step_count
+            net.initialize_optimizer()
+            self.lr_scheduler_ = self._get_scheduler(
+                net, self.policy_, **self.kwargs
+            )
+            self.lr_scheduler_._step_count = old_step_count
+            net.history.record(f"{self.event_name}_reset", 'x')
+            self.current_count = 0
+        else:
+            net.history.record(f"{self.event_name}_reset", ' ')
+        super().on_epoch_end(net, **kwargs)
+
+
+class CutMixedNeuralNetClassifier(NeuralNetClassifier):
+
+    def get_loss(self, y_pred, y_true, X=None, training=False):
+        y_true = to_tensor(y_true, device=self.device)
+        if training:
+            mixed_img, picked_label, lam = X
+            picked_label = to_tensor(picked_label, device=self.device)
+            lam = lam.to(self.device)
+
+            # loss = criterion(output, target_a) * lam + criterion(output, target_b) * (1. - lam)
+            al = self.criterion_(y_pred, y_true)
+            bl = self.criterion_(y_pred, picked_label)
+            return ((al * lam) + (bl * (1 - lam))).mean()
+        else:
+            return self.criterion_(y_pred, y_true).mean()
+
+    def train_step_single(self, batch, **fit_params):
+        self._set_training(True)
+        Xi, yi = unpack_data(batch)
+        y_pred = self.infer(Xi[0], **fit_params)
+        loss = self.get_loss(y_pred, yi, X=Xi, training=True)
+        loss.backward()
+        return {
+            'loss': loss,
+            'y_pred': y_pred,
+        }
+
+
 def net_def(
     net_class: nn.Module, net_name,
     classes, classifier_kwargs: dict,
+    cut_mixed=False
 ):
     net_name = net_name + '_'
 
@@ -230,18 +350,19 @@ def net_def(
     classifier_kwargs.setdefault('batch_size', 64)
     classifier_kwargs.setdefault('optimizer', optim.SGD)
     # classifier_kwargs.setdefault('optimizer', optim.Adam)
-    classifier_kwargs.setdefault('optimizer__momentum', 0.92)
-    # classifier_kwargs.setdefault(
+    classifier_kwargs.setdefault('optimizer__momentum', 0.9)
     classifier_kwargs.setdefault('iterator_train__shuffle', True)
     classifier_kwargs.setdefault('iterator_train__num_workers', 6)
     classifier_kwargs.setdefault('iterator_valid__num_workers', 6)
     classifier_kwargs.setdefault('device', get_device())
+
+    cp_fn_prefix = os.path.join('weights', net_name, net_name)
     default_callbacks = [
         EpochScoring(scoring='f1_macro', name='valid_f1',
                      lower_is_better=False),
         # LRScheduler(policy='StepLR', step_size=7, gamma=0.1),
         MyCheckpoint(monitor='valid_f1_best', load_best=True,
-                     fn_prefix=os.path.join('weights', net_name))
+                     fn_prefix=cp_fn_prefix)
     ]
     if classifier_kwargs.get('callbacks') is not None:
         default_callbacks.extend(classifier_kwargs['callbacks'])
@@ -251,7 +372,11 @@ def net_def(
         classifier_kwargs['train_split'] = predefined_split(
             classifier_kwargs.get('train_split'))
 
-    net = NeuralNetClassifier(
+    if cut_mixed:
+        classifier = CutMixedNeuralNetClassifier
+    else:
+        classifier = NeuralNetClassifier
+    net = classifier(
         net_class,
         classes=classes,
         warm_start=True,              # continue the last fit
@@ -259,27 +384,38 @@ def net_def(
     )
 
     setattr(net, 'net_name', net_name)
+    setattr(net, 'cp_fn_prefix', cp_fn_prefix)
     return net
 
 
-def net_fit(net: skorch.NeuralNet, x, y, epochs):
-    if os.path.exists(os.path.join('weights', f"{net.net_name}params.pt")):
-        with open(os.path.join('weights', f"{net.net_name}history.json"), 'rb') as f:
+def net_fit(net: skorch.NeuralNet, x, y, max_epochs):
+    weight_path_pre = os.path.join('weights', net.net_name)
+    if not os.path.exists(weight_path_pre):
+        os.makedirs(weight_path_pre, exist_ok=True)
+
+    params_pt_path = os.path.join(
+        weight_path_pre, f"{net.net_name}params.pt")
+    history_json_path = os.path.join(
+        weight_path_pre, f"{net.net_name}history.json")
+    optimizer_pt_path = os.path.join(
+        weight_path_pre, f"{net.net_name}optimizer.pt")
+    criterion_pt_path = os.path.join(
+        weight_path_pre, f"{net.net_name}criterion.pt")
+    if os.path.exists(params_pt_path):
+        with open(history_json_path, 'rb') as f:
             h = json.load(f)
         if net.history != h:
             print(f"Load saved params: {net.net_name}params.pt")
             net.initialize()
             pms = {}
-            pms['f_params'] = os.path.join(
-                'weights', f"{net.net_name}params.pt")
-            pms['f_history'] = os.path.join(
-                'weights', f"{net.net_name}history.json")
-            if os.path.exists(os.path.join('weights', f"{net.net_name}optimizer.pt")):
-                pms['f_optimizer'] = os.path.join(
-                    'weights', f"{net.net_name}optimizer.pt")
-            if os.path.exists(os.path.join('weights', f"{net.net_name}optimizer.pt")):
-                pms['f_criterion'] = os.path.join(
-                    'weights', f"{net.net_name}criterion.pt")
+            pms['f_params'] = params_pt_path
+            pms['f_history'] = history_json_path
+            if os.path.exists(optimizer_pt_path):
+                pms['f_optimizer'] = optimizer_pt_path
+
+            if os.path.exists(criterion_pt_path):
+                pms['f_criterion'] = criterion_pt_path
+
             net.load_params(**pms)
         else:
             print(f"Current params are the latest, continue the training.")
@@ -287,9 +423,11 @@ def net_fit(net: skorch.NeuralNet, x, y, epochs):
         print('Histories:')
         p = PrintLog()
         p.initialize()
-        data = net.history[-1]
+        data = net.history[0]
         verbose = net.verbose
         tabulated = p.table(data)
+
+        current_epochs = len(net.history)
 
         header, lines = tabulated.split('\n', 2)[:2]
         p._sink(header, verbose)
@@ -301,8 +439,15 @@ def net_fit(net: skorch.NeuralNet, x, y, epochs):
             p._sink(tabulated.split('\n')[2], verbose)
             if p.sink is print:
                 sys.stdout.flush()
+        epochs = max_epochs - current_epochs
+        if epochs > 0:
+            print('\n\n', 'Continue training:')
+            net.partial_fit(X=x, y=y, epochs=epochs)
+    else:
+        epochs = max_epochs
+        if epochs > 0:
+            print('\n\n', 'New training:')
+            net.fit(X=x, y=y, epochs=epochs)
 
-        print('\n\n', 'New training:')
-
-    net.fit(X=x, y=y, epochs=epochs)
     # print(net.history)
+    return net
