@@ -1,19 +1,6 @@
-import json
-import os
-import sys
-import skorch
-import time
-import torch
-import torch.nn as nn
-import numpy as np
-import torch.optim as optim
-from skorch import NeuralNetClassifier
-from skorch.helper import predefined_split
-from skorch.callbacks import LRScheduler, EpochScoring, PrintLog
-
-from utils.pytorch_helper import get_device
-
 import pickle
+import os
+import skorch
 import warnings
 from skorch.callbacks import Callback
 from skorch.exceptions import SkorchException
@@ -22,6 +9,16 @@ from skorch.utils import noop
 from skorch.utils import open_file_like
 from skorch.dataset import unpack_data
 from skorch.utils import to_tensor
+from torch.utils.data import DataLoader
+from torch.utils.data import TensorDataset
+from skorch import NeuralNetClassifier
+from skorch.callbacks import LRScheduler
+
+from utils import gradient, plotting_utils
+from torchvision.transforms.v2 import Transform, GaussianBlur
+import time
+import torch
+import numpy as np
 
 
 class MyCheckpoint(Callback):
@@ -75,7 +72,12 @@ class MyCheckpoint(Callback):
             os.makedirs(self.dirname, exist_ok=True)
         return self
 
-    def on_train_end(self, net, **kwargs):
+    def on_train_end(self, net: NeuralNetClassifier, **kwargs):
+        net.save_params(
+            f_params=f'{self.fn_prefix}last_params.pt',
+            f_criterion=f'{self.fn_prefix}last_criterion.pt',
+            f_optimizer=f'{self.fn_prefix}last_optimizer.pt'
+        )
         if not self.load_best or self.monitor is None:
             return
         self._sink("Loading best checkpoint after training.", net.verbose)
@@ -103,6 +105,9 @@ class MyCheckpoint(Callback):
 
         if self.event_name is not None:
             net.history.record(self.event_name, bool(do_checkpoint))
+
+        net.history.record(
+            'event_lr', net.optimizer_.param_groups[0]['lr'])
 
         if do_checkpoint:
             self.save_model(net)
@@ -338,116 +343,110 @@ class CutMixedNeuralNetClassifier(NeuralNetClassifier):
         }
 
 
-def net_def(
-    net_class: nn.Module, net_name,
-    classes, classifier_kwargs: dict,
-    cut_mixed=False
-):
-    net_name = net_name + '_'
+class DataAug(Callback):
 
-    classifier_kwargs.setdefault('lr', 0.001)
-    classifier_kwargs.setdefault('criterion', nn.CrossEntropyLoss)
-    classifier_kwargs.setdefault('batch_size', 64)
-    classifier_kwargs.setdefault('optimizer', optim.SGD)
-    # classifier_kwargs.setdefault('optimizer', optim.Adam)
-    classifier_kwargs.setdefault('optimizer__momentum', 0.9)
-    classifier_kwargs.setdefault('iterator_train__shuffle', True)
-    classifier_kwargs.setdefault('iterator_train__num_workers', 6)
-    classifier_kwargs.setdefault('iterator_valid__num_workers', 6)
-    classifier_kwargs.setdefault('device', get_device())
+    def __init__(self, number_samples=1, loss=True, th=0, p=0.5,
+                 composed_transforms: Transform = None, plot=False,
+                 on_batch=True, on_epoch_batch_size=64) -> None:
+        super().__init__()
+        self.number_samples = number_samples
+        self.loss = loss
+        self.th = th
+        self.p = p
+        self.composed_transforms = composed_transforms
+        self.plot = plot
+        self.on_batch = on_batch
+        self.on_epoch_batch_size = on_epoch_batch_size
 
-    cp_fn_prefix = os.path.join('weights', net_name, net_name)
-    default_callbacks = [
-        EpochScoring(scoring='f1_macro', name='valid_f1',
-                     lower_is_better=False),
-        # LRScheduler(policy='StepLR', step_size=7, gamma=0.1),
-        MyCheckpoint(monitor='valid_f1_best', load_best=True,
-                     fn_prefix=cp_fn_prefix)
-    ]
-    if classifier_kwargs.get('callbacks') is not None:
-        default_callbacks.extend(classifier_kwargs['callbacks'])
-    classifier_kwargs['callbacks'] = default_callbacks
+    def on_batch_begin(self, net: NeuralNetClassifier, batch=None, training=None, **kwargs):
+        if not training:
+            # print()
+            # print()
+            # print("Validating ========")
+            if self.plot:
+                plotting_utils.plot_hor(
+                    [plotting_utils.clp(i) for i in batch[0]])
+        if self.on_batch and training:
+            # print()
+            # print()
+            # print("Training ========")
+            if torch.rand(1).item() < self.p:
+                # print(self, batch[0].sum())
+                # batch[0] = torch.zeros_like(batch[0])
+                if self.plot:
+                    plotting_utils.plot_hor(
+                        [plotting_utils.clp(i) for i in batch[0]])
+                # st = time.time()
+                # exp = gradient.vanilla_gradient(
+                # exp = gradient.smooth_grad(
+                exp = gradient.guided_absolute_grad(
+                    net.module_, batch[0].to(
+                        net.device), batch[1].to(net.device),
+                    loss=self.loss, num_samples=self.number_samples)
 
-    if classifier_kwargs.get('train_split') is not None:
-        classifier_kwargs['train_split'] = predefined_split(
-            classifier_kwargs.get('train_split'))
+                n, w, h = exp.shape
+                q = torch.quantile(exp.reshape(n, w * h),
+                                   self.th, dim=1, keepdim=True).repeat(1, w * h)
+                exp = torch.where(exp > q.reshape(n, w, h), 1, 0)
+                # exp = torch.where(exp > q.reshape(n, 1))
+                # vs = torch.where(var > q.reshape(
+                #     n, c, 1, 1).repeat(1, 1, w, h),
+                #     1, var).reshape(n, c, w, h)
 
-    if cut_mixed:
-        classifier = CutMixedNeuralNetClassifier
-    else:
-        classifier = NeuralNetClassifier
-    net = classifier(
-        net_class,
-        classes=classes,
-        warm_start=True,              # continue the last fit
-        **classifier_kwargs
-    )
+                # loss=self.loss, num_samples=self.number_samples)
+                # )
+                # print(time.time() - st)
+                # print()
+                # print('----')
+                if self.plot:
+                    plotting_utils.plot_hor([i for i in exp.cpu()])
 
-    setattr(net, 'net_name', net_name)
-    setattr(net, 'cp_fn_prefix', cp_fn_prefix)
-    return net
+                blurrer = GaussianBlur(9)
+                exp = blurrer(exp)
+                if self.plot:
+                    plotting_utils.plot_hor([i for i in exp.cpu()])
+
+                n, w, h = exp.shape
+                exp = exp.reshape(n, 1, w, h).repeat(1, 3, 1, 1)
+                masked = batch[0].to(net.device) * exp
+
+                if self.plot:
+                    plotting_utils.plot_hor([plotting_utils.clp(i)
+                                            for i in masked.cpu()])
+                batch[0] = masked
+            elif self.composed_transforms is not None:
+                batch[0] = self.composed_transforms(batch[0])
+        return super().on_batch_begin(net, batch, training, **kwargs)
+
+    # def on_train_begin(self, net, X=None, y=None, **kwargs):
+    #     print(len(X), type(X))
+    #     return super().on_train_begin(net, X, y, **kwargs)
+
+    def on_epoch_begin(self, net, dataset_train=None, dataset_valid=None, **kwargs):
+        if not self.on_batch:
+            X_list, y_list = [], []
+            if torch.rand(1).item() < self.p:
+                batch_dataloader = DataLoader(
+                    dataset_train, self.on_epoch_batch_size)
+                for X, y in batch_dataloader:
+                    exp = gradient.guided_absolute_grad(
+                        net.module_, X.to(net.device), y.to(net.device),
+                        loss=self.loss, num_samples=self.number_samples, th=self.th)
+                    n, w, h = exp.shape
+                    masked = X.to(net.device) * \
+                        exp.reshape(n, 1, w, h).repeat(1, 3, 1, 1)
+                    X_list.extend(masked)
+                    y_list.extend(y)
+                dataset_train = TensorDataset(
+                    torch.stack(X_list), torch.stack(y_list))
+        return super().on_epoch_begin(net, dataset_train, dataset_valid, **kwargs)
 
 
-def net_fit(net: skorch.NeuralNet, x, y, max_epochs):
-    weight_path_pre = os.path.join('weights', net.net_name)
-    if not os.path.exists(weight_path_pre):
-        os.makedirs(weight_path_pre, exist_ok=True)
+class Training(Callback):
+    # https://github.com/huggingface/pytorch-image-models/blob/main/train.py
+    def __init__(self) -> None:
+        super().__init__()
 
-    params_pt_path = os.path.join(
-        weight_path_pre, f"{net.net_name}params.pt")
-    history_json_path = os.path.join(
-        weight_path_pre, f"{net.net_name}history.json")
-    optimizer_pt_path = os.path.join(
-        weight_path_pre, f"{net.net_name}optimizer.pt")
-    criterion_pt_path = os.path.join(
-        weight_path_pre, f"{net.net_name}criterion.pt")
-    if os.path.exists(params_pt_path):
-        with open(history_json_path, 'rb') as f:
-            h = json.load(f)
-        if net.history != h:
-            print(f"Load saved params: {net.net_name}params.pt")
-            net.initialize()
-            pms = {}
-            pms['f_params'] = params_pt_path
-            pms['f_history'] = history_json_path
-            if os.path.exists(optimizer_pt_path):
-                pms['f_optimizer'] = optimizer_pt_path
+    def on_train_begin(self, net, X=None, y=None, **kwargs):
 
-            if os.path.exists(criterion_pt_path):
-                pms['f_criterion'] = criterion_pt_path
-
-            net.load_params(**pms)
-        else:
-            print(f"Current params are the latest, continue the training.")
-
-        print('Histories:')
-        p = PrintLog()
-        p.initialize()
-        data = net.history[0]
-        verbose = net.verbose
-        tabulated = p.table(data)
-
-        current_epochs = len(net.history)
-
-        header, lines = tabulated.split('\n', 2)[:2]
-        p._sink(header, verbose)
-        p._sink(lines, verbose)
-
-        for h in net.history:
-            tabulated = p.table(h)
-            header, lines = tabulated.split('\n', 2)[:2]
-            p._sink(tabulated.split('\n')[2], verbose)
-            if p.sink is print:
-                sys.stdout.flush()
-        epochs = max_epochs - current_epochs
-        if epochs > 0:
-            print('\n\n', 'Continue training:')
-            net.partial_fit(X=x, y=y, epochs=epochs)
-    else:
-        epochs = max_epochs
-        if epochs > 0:
-            print('\n\n', 'New training:')
-            net.fit(X=x, y=y, epochs=epochs)
-
-    # print(net.history)
-    return net
+        return super().on_train_begin(net, X, y, **kwargs)

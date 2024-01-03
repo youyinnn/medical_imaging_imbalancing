@@ -150,8 +150,8 @@ class ISIC_2018(Dataset):
         size=(256, 256),
         cut_mixed=False,
         verbose=0,
-        transform: transforms.Compose = None,
-        target_transform: transforms.Compose = None,
+        transform: v2.Compose = None,
+        target_transform: v2.Compose = None,
     ):
 
         self.cut_mixed = cut_mixed
@@ -209,7 +209,7 @@ class ISIC_2018(Dataset):
             self.transform = v2.Compose([
                 v2.Resize(size, antialias=True),
                 # transforms.ToTensor(),
-                # v2.Normalize(mean=self.mean_t, std=self.std_t),
+                v2.Normalize(mean=self.mean_t, std=self.std_t),
             ])
         else:
             self.transform = v2.Compose([

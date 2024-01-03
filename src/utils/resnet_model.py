@@ -2,7 +2,7 @@ import torch.nn as nn
 from torchvision import models
 
 
-class ISICResNet18(nn.Module):
+class ResNet18(nn.Module):
     def __init__(self, output_features, weights=models.ResNet18_Weights.IMAGENET1K_V1):
         super().__init__()
         model = models.resnet18(
@@ -15,7 +15,7 @@ class ISICResNet18(nn.Module):
         return self.model(x)
 
 
-class ISICResNet50(nn.Module):
+class ResNet50(nn.Module):
     def __init__(self, output_features, weights=models.ResNet50_Weights.IMAGENET1K_V1):
         super().__init__()
         model = models.resnet50(
@@ -28,7 +28,7 @@ class ISICResNet50(nn.Module):
         return self.model(x)
 
 
-class ISICResNet34(nn.Module):
+class ResNet34(nn.Module):
     def __init__(self, output_features, weights=models.ResNet34_Weights.IMAGENET1K_V1):
         super().__init__()
         model = models.resnet34(
