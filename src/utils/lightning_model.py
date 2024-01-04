@@ -3,7 +3,7 @@ import lightning as L
 from torchvision import models
 import torch
 import torch.nn as nn
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, accuracy_score, top_k_accuracy_score
 import timm
 
 
@@ -56,6 +56,7 @@ class LightningClassifier(L.LightningModule):
         self.optimizer = optimizer
         self.optimizer_kwargs = optimizer_kwargs
         self.prog_bar = prog_bar
+        self.output_features = output_features
 
     def forward(self, x):
         return self.model(x)
@@ -63,11 +64,18 @@ class LightningClassifier(L.LightningModule):
     def eval_metrics(self, event_key, batch, batch_idx, output, loss):
         x, y = batch
         yy = y.cpu().numpy()
+        output = output.detach()
         oo = torch.argmax(output, dim=1).cpu().numpy()
         f1 = f1_score(yy, oo, average='macro')
+        acc = accuracy_score(yy, oo)
+        sm = torch.softmax(output, dim=1)
+        top_5 = top_k_accuracy_score(yy, sm.cpu().numpy(), k=5,
+                                     labels=[i for i in range(self.output_features)])
         self.log_dict({
             f"{event_key}_loss": loss,
             f"{event_key}_f1": f1,
+            f"{event_key}_acc": acc,
+            f"{event_key}_top5": top_5,
         }, prog_bar=self.prog_bar)
 
     def training_step(self, batch, batch_idx):

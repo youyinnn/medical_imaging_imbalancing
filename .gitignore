@@ -10,3 +10,6 @@ lightning_logs
 test
 *.ckpt
 *.pt
+
+.vscode
+.ipynb_checkpoints

@@ -84,6 +84,10 @@ class CIFAR100DataModule(L.LightningDataModule):
             num_workers=0,
         )
 
+    def prepare_data(self):
+        # download the data
+        datasets.CIFAR100(self.data_dir, train=True, download=True)
+
     def setup(self, stage: str):
         if stage == 'fit':
             cifar100_train_all = datasets.CIFAR100(
