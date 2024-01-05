@@ -6,7 +6,6 @@ weights
 .DS_Store
 
 output
-lightning_logs
 test
 *.ckpt
 *.pt
