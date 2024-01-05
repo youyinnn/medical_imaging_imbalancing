@@ -55,7 +55,8 @@ class CIFAR100DataModule(L.LightningDataModule):
                  batch_size: int = 64, train_batch_size: int = None,
                  val_batch_size: int = None, test_batch_size: int = None,
                  train_size_ratio=0.8, data_loader_kwargs=None,
-                 img_size: (int, int) = (224, 224), transform=None, target_transform=None):
+                 img_size=None, img_size_w: int = None, img_size_h: int = None,
+                 transform=None, target_transform=None):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
@@ -67,12 +68,20 @@ class CIFAR100DataModule(L.LightningDataModule):
         self.mean_t = torch.tensor([0.485, 0.456, 0.406])
         self.std_t = torch.tensor([0.229, 0.224, 0.225])
         self.img_size = img_size
+        self.img_size_w = img_size_w
+        self.img_size_h = img_size_h
 
         if transform is None:
             additionals = []
-            if self.img_size[0] != 32:
-                additionals.append(v2.RandomResizedCrop(
-                    size=self.img_size, antialias=True))
+            if self.img_size != None:
+                size = self.img_size
+            elif self.img_size_w != None and self.img_size_h != None:
+                size = (self.img_size_w, self.img_size_h)
+            else:
+                size = 224
+
+            additionals.append(v2.RandomResizedCrop(
+                size=size, antialias=True))
             self.transform = v2.Compose([
                 v2.ToImage(), v2.ToDtype(torch.float32, scale=True),
                 *additionals,

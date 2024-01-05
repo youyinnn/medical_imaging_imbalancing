@@ -1,4 +1,8 @@
 
+from lightning.pytorch.tuner import Tuner
+from typing import Dict, Type
+from lightning.pytorch.cli import LightningCLI, SaveConfigCallback
+from lightning.pytorch.callbacks import Callback
 import lightning as L
 from torchvision import models
 import torch
@@ -26,18 +30,31 @@ model_map = dict(
 )
 
 
+class MyLightningCLI(LightningCLI):
+    def before_fit(self):
+        if self.model.lr < 0:
+            print('Learning rate is not set, use tuner to find it.')
+            trainer = L.Trainer(max_epochs=50)
+            tuner = Tuner(trainer)
+            # start with a valid lr
+            self.model.lr = 1e-3
+            lr_finder = tuner.lr_find(
+                self.model, attr_name="lr", datamodule=self.datamodule)
+            print('Tuned learning rate:', self.model.lr)
+
+
 class LightningClassifier(L.LightningModule):
 
     def __init__(self,
                  model_key: str,
                  output_features: int,
-                 lr: float = 1e-3,
+                 lr: float,
                  prog_bar: bool = False,
-                 loss_fn=nn.CrossEntropyLoss,
+                 loss_fn_key='CrossEntropyLoss',
                  loss_fn_kwargs: dict = {},
-                 pretrained: bool = True,
-                 optimizer: torch.optim.Optimizer = torch.optim.Adam,
-                 optimizer_kwargs: dict = {}):
+                 optimizer_key='Adam',
+                 optimizer_kwargs: dict = {},
+                 pretrained: bool = True):
         super().__init__()
 
         model_info = model_map[model_key]
@@ -45,16 +62,21 @@ class LightningClassifier(L.LightningModule):
         model_weights = model_info['weights']
 
         if model_key.startswith('pytorch'):
-            model = model_class(weights=model_weights)
+            model = model_class(weights=model_weights if pretrained else None)
             model = model_info['fine_tune'](model, output_features)
         if model_key.startswith('timm_'):
-            model = model_class(model_weights, pretrained=True)
+            model = model_class(model_weights, pretrained=pretrained,
+                                num_classes=output_features)
 
         self.model = model
         self.lr = lr
-        self.loss_fn = loss_fn(**loss_fn_kwargs)
-        self.optimizer = optimizer
+        self.loss_fn_key = loss_fn_key
+        self.loss_fn_kwargs = loss_fn_kwargs
+        self.loss_fn = getattr(torch.nn, loss_fn_key)(**loss_fn_kwargs)
+
+        self.optimizer_key = optimizer_key
         self.optimizer_kwargs = optimizer_kwargs
+        self.optimizer_class = getattr(torch.optim, optimizer_key)
         self.prog_bar = prog_bar
         self.output_features = output_features
 
@@ -101,6 +123,6 @@ class LightningClassifier(L.LightningModule):
         # optimizer = torch.optim.SGD(
         #     self.parameters(), lr=self.lr, momentum=0.9)
         # optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        optimizer = self.optimizer(
+        optimizer = self.optimizer_class(
             self.model.parameters(), lr=self.lr, **self.optimizer_kwargs)
         return optimizer
