@@ -12,3 +12,4 @@ test
 
 .vscode
 .ipynb_checkpoints
+*.log
