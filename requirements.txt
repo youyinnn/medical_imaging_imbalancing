@@ -17,3 +17,6 @@ dataframe_image
 plotly
 timm
 lightning
+jupyter
+notebook  
+tensorboard
