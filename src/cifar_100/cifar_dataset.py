@@ -51,7 +51,7 @@ class CIFAR100():
 
 
 class CIFAR100DataModule(L.LightningDataModule):
-    def __init__(self, data_dir: str = "../../data/cifar",
+    def __init__(self, data_dir: str = "~/ml_data/cifar-100",
                  batch_size: int = 64, train_batch_size: int = None,
                  val_batch_size: int = None, test_batch_size: int = None,
                  train_size_ratio=0.8, data_loader_kwargs=None,

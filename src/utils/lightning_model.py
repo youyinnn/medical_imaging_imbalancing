@@ -31,16 +31,29 @@ model_map = dict(
 
 
 class MyLightningCLI(LightningCLI):
+    def add_arguments_to_parser(self, parser):
+        parser.add_argument("--lr_tuner.num_training_multiple", default=1)
+
     def before_fit(self):
         if self.model.lr < 0:
             print('Learning rate is not set, use tuner to find it.')
-            trainer = L.Trainer(max_epochs=50)
+            trainer = L.Trainer(
+                # disable logger of the tuner trainer
+                max_epochs=50, enable_checkpointing=False, logger=False)
             tuner = Tuner(trainer)
             # start with a valid lr
+            dm = self.datamodule
+            dm.setup('fit')
+            iterations = len(dm.train_dataloader())
             self.model.lr = 1e-3
             lr_finder = tuner.lr_find(
-                self.model, attr_name="lr", datamodule=self.datamodule)
+                self.model, attr_name="lr", datamodule=self.datamodule,
+                num_training=int(
+                    iterations * self.config.fit.lr_tuner.num_training_multiple),
+                # this param has bug, set to None
+                early_stop_threshold=None)
             print('Tuned learning rate:', self.model.lr)
+            self.config.fit.model.lr = self.model.lr
 
 
 class LightningClassifier(L.LightningModule):
@@ -90,8 +103,7 @@ class LightningClassifier(L.LightningModule):
         oo = torch.argmax(output, dim=1).cpu().numpy()
         f1 = f1_score(yy, oo, average='macro')
         acc = accuracy_score(yy, oo)
-        sm = torch.softmax(output, dim=1)
-        top_5 = top_k_accuracy_score(yy, sm.cpu().numpy(), k=5,
+        top_5 = top_k_accuracy_score(yy, output.cpu(), k=5,
                                      labels=[i for i in range(self.output_features)])
         self.log_dict({
             f"{event_key}_loss": loss,
