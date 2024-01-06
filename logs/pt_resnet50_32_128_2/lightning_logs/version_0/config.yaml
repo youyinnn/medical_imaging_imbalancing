@@ -1,0 +1,72 @@
+# lightning.pytorch==2.1.3
+seed_everything: 42
+trainer:
+  accelerator: auto
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: null
+  logger: null
+  callbacks: null
+  fast_dev_run: false
+  max_epochs: 50
+  min_epochs: null
+  max_steps: -1
+  min_steps: null
+  max_time: null
+  limit_train_batches: null
+  limit_val_batches: null
+  limit_test_batches: null
+  limit_predict_batches: null
+  overfit_batches: 0.0
+  val_check_interval: null
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: null
+  log_every_n_steps: null
+  enable_checkpointing: null
+  enable_progress_bar: null
+  enable_model_summary: null
+  accumulate_grad_batches: 1
+  gradient_clip_val: null
+  gradient_clip_algorithm: null
+  deterministic: null
+  benchmark: null
+  inference_mode: true
+  use_distributed_sampler: true
+  profiler: null
+  detect_anomaly: false
+  barebones: false
+  plugins: null
+  sync_batchnorm: false
+  reload_dataloaders_every_n_epochs: 0
+  default_root_dir: ./logs/pt_resnet50_32_128_2/
+model:
+  model_key: pytorch_resnet50
+  output_features: 100
+  lr: 0.0004484945691362329
+  prog_bar: false
+  loss_fn_key: CrossEntropyLoss
+  loss_fn_kwargs: {}
+  optimizer_key: Adam
+  optimizer_kwargs: {}
+  lr_scheduler_key: null
+  lr_scheduler_base: torch
+  lr_scheduler_kwargs: null
+  lr_scheduler_config: null
+  pretrained: true
+data:
+  data_dir: ~/ml_data/cifar-100
+  batch_size: 128
+  train_batch_size: null
+  val_batch_size: null
+  test_batch_size: null
+  train_size_ratio: 0.8
+  data_loader_kwargs: null
+  img_size: 32
+  img_size_w: null
+  img_size_h: null
+  transform: null
+  target_transform: null
+lr_tuner:
+  num_training_multiple: 2
+ckpt_path: null

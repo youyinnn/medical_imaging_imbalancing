@@ -1,0 +1,13 @@
+trainer:
+  default_root_dir: ./logs/pt_resnet50_32_128_2/
+data:
+  img_size: 32
+lr_tuner:
+  num_training_multiple: 2
+model:
+  lr: 0.01
+  lr_scheduler_base: timm
+  lr_scheduler_key: TanhLRScheduler
+  lr_scheduler_kwargs:
+    t_initial: 15
+    cycle_limit: 3

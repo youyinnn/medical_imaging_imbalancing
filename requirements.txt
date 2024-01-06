@@ -21,3 +21,4 @@ jupyter
 notebook  
 tensorboard
 lightning[pytorch-extra]
+finetuning-scheduler

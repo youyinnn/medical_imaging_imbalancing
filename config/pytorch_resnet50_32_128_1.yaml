@@ -1,0 +1,6 @@
+trainer:
+  default_root_dir: ./logs/pt_resnet50_32_128_1/
+data:
+  img_size: 32
+lr_tuner:
+  num_training_multiple: 1

@@ -1,0 +1,6 @@
+trainer:
+  default_root_dir: ./logs/timm_mixer_224_128/
+data:
+  img_size: 224
+lr_tuner:
+  num_training_multiple: 2

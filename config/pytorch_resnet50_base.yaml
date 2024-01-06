@@ -1,8 +1,6 @@
 seed_everything: 42
 trainer:
-  logger: true
   max_epochs: 50
-  log_every_n_steps: 20
 model:
   lr: -1.0
   model_key: pytorch_resnet50

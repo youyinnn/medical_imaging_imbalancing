@@ -1,14 +1,14 @@
 
+import logging
 from lightning.pytorch.tuner import Tuner
-from typing import Dict, Type
-from lightning.pytorch.cli import LightningCLI, SaveConfigCallback
-from lightning.pytorch.callbacks import Callback
+from lightning.pytorch.cli import LightningCLI
 import lightning as L
 from torchvision import models
 import torch
 import torch.nn as nn
 from sklearn.metrics import f1_score, accuracy_score, top_k_accuracy_score
 import timm
+from timm.scheduler import tanh_lr, cosine_lr, plateau_lr, step_lr
 
 
 def pytorch_resnet_fine_tuning(model, output_features):
@@ -34,26 +34,40 @@ class MyLightningCLI(LightningCLI):
     def add_arguments_to_parser(self, parser):
         parser.add_argument("--lr_tuner.num_training_multiple", default=1)
 
-    def before_fit(self):
+    def tuner_(self, subcommand: str):
         if self.model.lr < 0:
             print('Learning rate is not set, use tuner to find it.')
+
+            # disable warning: https://github.com/Lightning-AI/pytorch-lightning/issues/3431
+            log_level_before = logging.getLogger(
+                "lightning.pytorch.utilities.rank_zero").getEffectiveLevel()
+            logging.getLogger("lightning.pytorch.utilities.rank_zero").setLevel(
+                logging.WARNING)
             trainer = L.Trainer(
                 # disable logger of the tuner trainer
-                max_epochs=50, enable_checkpointing=False, logger=False)
+                max_epochs=50, enable_checkpointing=False, logger=False, enable_model_summary=False)
             tuner = Tuner(trainer)
             # start with a valid lr
             dm = self.datamodule
-            dm.setup('fit')
+            dm.setup(subcommand)
             iterations = len(dm.train_dataloader())
             self.model.lr = 1e-3
+            ns = getattr(self.config, subcommand)
             lr_finder = tuner.lr_find(
                 self.model, attr_name="lr", datamodule=self.datamodule,
                 num_training=int(
-                    iterations * self.config.fit.lr_tuner.num_training_multiple),
+                    iterations * ns.lr_tuner.num_training_multiple),
                 # this param has bug, set to None
                 early_stop_threshold=None)
-            print('Tuned learning rate:', self.model.lr)
-            self.config.fit.model.lr = self.model.lr
+            ns.model.lr = self.model.lr
+            logging.getLogger("lightning.pytorch.utilities.rank_zero").setLevel(
+                log_level_before)
+
+    def before_fit(self):
+        self.tuner_(subcommand='fit')
+
+    def before_validate(self):
+        self.tuner_(subcommand='validate')
 
 
 class LightningClassifier(L.LightningModule):
@@ -67,6 +81,10 @@ class LightningClassifier(L.LightningModule):
                  loss_fn_kwargs: dict = {},
                  optimizer_key='Adam',
                  optimizer_kwargs: dict = {},
+                 lr_scheduler_key=None,
+                 lr_scheduler_base='torch',
+                 lr_scheduler_kwargs: dict = None,
+                 lr_scheduler_config: dict = None,
                  pretrained: bool = True):
         super().__init__()
 
@@ -90,6 +108,44 @@ class LightningClassifier(L.LightningModule):
         self.optimizer_key = optimizer_key
         self.optimizer_kwargs = optimizer_kwargs
         self.optimizer_class = getattr(torch.optim, optimizer_key)
+
+        self.lr_scheduler_key = lr_scheduler_key
+        self.lr_scheduler_kwargs = lr_scheduler_kwargs
+        self.lr_scheduler_config = lr_scheduler_config
+        self.lr_scheduler_base = lr_scheduler_base
+        if lr_scheduler_base == 'torch':
+            lrs_base = torch.optim.lr_scheduler
+            self.lr_scheduler_class = getattr(
+                lrs_base, lr_scheduler_key) if lr_scheduler_key is not None else None
+        elif lr_scheduler_base.startswith('timm'):
+            if lr_scheduler_key == 'CosineLRScheduler':
+                self.lr_scheduler_class = cosine_lr.CosineLRScheduler
+            if lr_scheduler_key == 'TanhLRScheduler':
+                self.lr_scheduler_class = tanh_lr.TanhLRScheduler
+            if lr_scheduler_key == 'StepLRScheduler':
+                self.lr_scheduler_class = step_lr.StepLRScheduler
+            if lr_scheduler_key == 'PlateauLRScheduler':
+                self.lr_scheduler_class = plateau_lr.PlateauLRScheduler
+
+            if self.lr_scheduler_config is None:
+                self.lr_scheduler_config = {
+                    "interval": "epoch",
+                    # How many epochs/steps should pass between calls to
+                    # `scheduler.step()`. 1 corresponds to updating the learning
+                    # rate after every epoch/step.
+                    "frequency": 1,
+                    # Metric to to monitor for schedulers like `ReduceLROnPlateau`
+                    "monitor": "val_loss",
+                    # If set to `True`, will enforce that the value specified 'monitor'
+                    # is available when the scheduler is updated, thus stopping
+                    # training if not found. If set to `False`, it will only produce a warning
+                    "strict": True,
+                    # If using the `LearningRateMonitor` callback to monitor the
+                    # learning rate progress, this keyword can be used to specify
+                    # a custom logged name
+                    "name": None,
+                }
+
         self.prog_bar = prog_bar
         self.output_features = output_features
 
@@ -110,6 +166,7 @@ class LightningClassifier(L.LightningModule):
             f"{event_key}_f1": f1,
             f"{event_key}_acc": acc,
             f"{event_key}_top5": top_5,
+            f"{event_key}_lr": self.optimizer.param_groups[0]['lr'],
         }, prog_bar=self.prog_bar)
 
     def training_step(self, batch, batch_idx):
@@ -135,6 +192,23 @@ class LightningClassifier(L.LightningModule):
         # optimizer = torch.optim.SGD(
         #     self.parameters(), lr=self.lr, momentum=0.9)
         # optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        optimizer = self.optimizer_class(
+        self.optimizer = self.optimizer_class(
             self.model.parameters(), lr=self.lr, **self.optimizer_kwargs)
-        return optimizer
+        if self.lr_scheduler_class is not None:
+            # https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
+            self.lr_scheduler = self.lr_scheduler_class(
+                self.optimizer, **self.lr_scheduler_kwargs)
+            return dict(
+                optimizer=self.optimizer,
+                lr_scheduler=self.lr_scheduler,
+                ** self.lr_scheduler_config
+            )
+        else:
+            return self.optimizer
+
+    def lr_scheduler_step(self, scheduler, metric):
+        if self.lr_scheduler_base == 'timm':
+            # timm's scheduler need the epoch value
+            scheduler.step(epoch=self.current_epoch)
+        else:
+            scheduler.step()

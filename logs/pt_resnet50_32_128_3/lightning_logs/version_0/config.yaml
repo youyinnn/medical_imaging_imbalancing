@@ -6,7 +6,7 @@ trainer:
   devices: auto
   num_nodes: 1
   precision: null
-  logger: true
+  logger: null
   callbacks: null
   fast_dev_run: false
   max_epochs: 50
@@ -39,16 +39,22 @@ trainer:
   plugins: null
   sync_batchnorm: false
   reload_dataloaders_every_n_epochs: 0
-  default_root_dir: ./logs/pt_resnet50_32_128/
+  default_root_dir: ./logs/pt_resnet50_32_128_2/
 model:
   model_key: pytorch_resnet50
   output_features: 100
-  lr: 0.0004756815356796254
+  lr: 0.01
   prog_bar: false
   loss_fn_key: CrossEntropyLoss
   loss_fn_kwargs: {}
   optimizer_key: Adam
   optimizer_kwargs: {}
+  lr_scheduler_key: TanhLRScheduler
+  lr_scheduler_base: timm
+  lr_scheduler_kwargs:
+    t_initial: 15
+    cycle_limit: 3
+  lr_scheduler_config: null
   pretrained: true
 data:
   data_dir: ~/ml_data/cifar-100

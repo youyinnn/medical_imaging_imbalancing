@@ -98,15 +98,14 @@ class CIFAR100DataModule(L.LightningDataModule):
         datasets.CIFAR100(self.data_dir, train=True, download=True)
 
     def setup(self, stage: str):
-        if stage == 'fit':
+        if stage in ['fit', 'validate']:
             cifar100_train_all = datasets.CIFAR100(
                 self.data_dir, train=True, transform=self.transform,
                 target_transform=self.target_transform)
             train_size = int(self.train_size_ratio * len(cifar100_train_all))
             test_size = len(cifar100_train_all) - train_size
             self.cifar100_train, self.cifar100_val = \
-                random_split(cifar100_train_all, [train_size, test_size],
-                             generator=torch.Generator().manual_seed(42))
+                random_split(cifar100_train_all, [train_size, test_size])
         if stage in ['test', 'predict']:
             self.cifar100_test = datasets.CIFAR100(
                 self.data_dir, train=False, transform=self.transform,
@@ -114,8 +113,7 @@ class CIFAR100DataModule(L.LightningDataModule):
 
     def train_dataloader(self):
         return DataLoader(self.cifar100_train, batch_size=self.train_batch_size,
-                          shuffle=True, generator=torch.Generator().manual_seed(42),
-                          **self.data_loader_kwargs)
+                          shuffle=True, **self.data_loader_kwargs)
 
     def val_dataloader(self):
         return DataLoader(self.cifar100_val, batch_size=self.val_batch_size, **self.data_loader_kwargs)

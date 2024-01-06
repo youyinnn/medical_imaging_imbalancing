@@ -1,4 +1,0 @@
-trainer:
-  default_root_dir: ./logs/pt_resnet50_32_128/
-data:
-  img_size: 32
