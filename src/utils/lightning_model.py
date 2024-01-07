@@ -1,5 +1,6 @@
 
 import logging
+import os
 from lightning.pytorch.tuner import Tuner
 from lightning.pytorch.cli import LightningCLI
 import lightning as L
@@ -64,10 +65,32 @@ class MyLightningCLI(LightningCLI):
                 log_level_before)
 
     def before_fit(self):
+        self.get_autodl_tk()
         self.tuner_(subcommand='fit')
 
     def before_validate(self):
         self.tuner_(subcommand='validate')
+
+    def get_autodl_tk(self):
+        from pathlib import Path
+        home = str(Path.home())
+        tk_path = os.path.join(home, 'autodl_tk')
+        if os.path.exists(tk_path):
+            print("Token exist")
+            return tk_path
+
+    def after_fit(self):
+        tk_path = self.get_autodl_tk()
+        if tk_path is not None:
+            with open(tk_path, 'r') as f:
+                import requests
+                headers = {"Authorization": f.read()}
+                resp = requests.post("https://www.autodl.com/api/v1/wechat/message/send",
+                                     json={
+                                         "title": "MII",
+                                         "name": self.config.fit.trainer.default_root_dir,
+                                         "content": "Training finshed."
+                                     }, headers=headers)
 
 
 class LightningClassifier(L.LightningModule):

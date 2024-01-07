@@ -9,7 +9,7 @@ data:
           init_args:
             p: 0.5
         - class_path: torchvision.transforms.v2.RandomVerticalFlip
-                  init_args:
-                    p: 0.5
+          init_args:
+            p: 0.5
 lr_tuner:
   num_training_multiple: 1
