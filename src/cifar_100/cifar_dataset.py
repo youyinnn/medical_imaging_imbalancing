@@ -5,8 +5,8 @@ import lightning as L
 import torch
 from torchvision import datasets
 from torchvision.transforms import v2
-import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+from src.utils.pytorch_helper import init_transform
 
 
 def to_float(y):
@@ -56,7 +56,7 @@ class CIFAR100DataModule(L.LightningDataModule):
                  val_batch_size: int = None, test_batch_size: int = None,
                  train_size_ratio=0.8, data_loader_kwargs=None,
                  img_size=None, img_size_w: int = None, img_size_h: int = None,
-                 transform=None, target_transform=None):
+                 transform: list = [], target_transform=None):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
@@ -71,22 +71,24 @@ class CIFAR100DataModule(L.LightningDataModule):
         self.img_size_w = img_size_w
         self.img_size_h = img_size_h
 
-        if transform is None:
-            additionals = []
-            if self.img_size != None:
-                size = self.img_size
-            elif self.img_size_w != None and self.img_size_h != None:
-                size = (self.img_size_w, self.img_size_h)
-            else:
-                size = 224
-
-            additionals.append(v2.RandomResizedCrop(
-                size=size, antialias=True))
-            self.transform = v2.Compose([
-                v2.ToImage(), v2.ToDtype(torch.float32, scale=True),
-                *additionals,
-                v2.Normalize(mean=self.mean_t, std=self.std_t),
-            ])
+        if self.img_size != None:
+            size = self.img_size
+        elif self.img_size_w != None and self.img_size_h != None:
+            size = (self.img_size_w, self.img_size_h)
+        else:
+            size = 224
+        if len(transform) > 0 and type(transform[0]) is dict:
+            initialized_transform = []
+            for settings in transform:
+                initialized_transform.append(
+                    init_transform(settings['class_path'], settings['init_args']))
+            transform = initialized_transform
+        self.transform = v2.Compose([
+            v2.ToImage(), v2.ToDtype(torch.float32, scale=True),
+            v2.RandomResizedCrop(size=size, antialias=True),
+            *transform,
+            v2.Normalize(mean=self.mean_t, std=self.std_t),
+        ])
         self.target_transform = target_transform
         self.train_size_ratio = train_size_ratio
         self.data_loader_kwargs = data_loader_kwargs if data_loader_kwargs is not None else dict(

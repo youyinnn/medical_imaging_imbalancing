@@ -1,0 +1,15 @@
+trainer:
+  default_root_dir: ./logs/pt_resnet50_32_128_2_t224/
+data:
+  img_size: 224
+  transform:
+    - class_path: torchvision.transforms.v2.RandomChoice
+      init_args:
+        - class_path: torchvision.transforms.v2.RandomHorizontalFlip
+          init_args:
+            p: 0.5
+        - class_path: torchvision.transforms.v2.RandomVerticalFlip
+                  init_args:
+                    p: 0.5
+lr_tuner:
+  num_training_multiple: 1
