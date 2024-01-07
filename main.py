@@ -1,6 +1,8 @@
 # main.py
-from src.cifar_100.cifar_dataset import CIFAR100DataModule
+# autopep8: off
 from src.utils.lightning_model import LightningClassifier, MyLightningCLI
+from src.cifar_100.cifar_dataset import CIFAR100DataModule
+# autopep8: on
 
 
 def cli_main():
