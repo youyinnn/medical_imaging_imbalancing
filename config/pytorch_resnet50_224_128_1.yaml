@@ -1,5 +1,5 @@
 trainer:
-  default_root_dir: ./logs/pt_resnet50_224_128/
+  default_root_dir: ./logs/pt_resnet50_224_128_1/
 data:
   img_size: 224
 lr_tuner:

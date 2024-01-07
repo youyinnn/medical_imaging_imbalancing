@@ -39,7 +39,7 @@ trainer:
   plugins: null
   sync_batchnorm: false
   reload_dataloaders_every_n_epochs: 0
-  default_root_dir: ./logs/pt_resnet50_224_128/
+  default_root_dir: ./logs/pt_resnet50_224_128_2/
 model:
   model_key: pytorch_resnet50
   output_features: 100
