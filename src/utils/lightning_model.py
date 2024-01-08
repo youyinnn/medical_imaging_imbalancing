@@ -94,81 +94,6 @@ class MyLightningCLI(LightningCLI):
                                      }, headers=headers)
 
 
-def create_transform(
-        input_size,
-        is_training=False,
-        use_prefetcher=False,
-        no_aug=False,
-        scale=None,
-        ratio=None,
-        hflip=0.5,
-        vflip=0.,
-        color_jitter=0.4,
-        auto_augment=None,
-        interpolation='bilinear',
-        re_prob=0.,
-        re_mode='const',
-        re_count=1,
-        re_num_splits=0,
-        crop_pct=None,
-        crop_mode=None,
-        tf_preprocessing=False,
-        separate=False):
-
-    if isinstance(input_size, (tuple, list)):
-        img_size = input_size[-2:]
-    else:
-        img_size = input_size
-
-    if tf_preprocessing and use_prefetcher:
-        assert not separate, "Separate transforms not supported for TF preprocessing"
-        from timm.data.tf_preprocessing import TfPreprocessTransform
-        transform = TfPreprocessTransform(
-            is_training=is_training, size=img_size, interpolation=interpolation)
-    else:
-        if is_training and no_aug:
-            assert not separate, "Cannot perform split augmentation with no_aug"
-            transform = transforms_noaug_train(
-                img_size,
-                interpolation=interpolation,
-                use_prefetcher=use_prefetcher,
-                mean=mean,
-                std=std,
-            )
-        elif is_training:
-            transform = transforms_imagenet_train(
-                img_size,
-                scale=scale,
-                ratio=ratio,
-                hflip=hflip,
-                vflip=vflip,
-                color_jitter=color_jitter,
-                auto_augment=auto_augment,
-                interpolation=interpolation,
-                use_prefetcher=use_prefetcher,
-                mean=mean,
-                std=std,
-                re_prob=re_prob,
-                re_mode=re_mode,
-                re_count=re_count,
-                re_num_splits=re_num_splits,
-                separate=separate,
-            )
-        else:
-            assert not separate, "Separate transforms not supported for validation preprocessing"
-            transform = transforms_imagenet_eval(
-                img_size,
-                interpolation=interpolation,
-                use_prefetcher=use_prefetcher,
-                mean=mean,
-                std=std,
-                crop_pct=crop_pct,
-                crop_mode=crop_mode,
-            )
-
-    return transform
-
-
 class LightningClassifier(L.LightningModule):
 
     def __init__(self,
@@ -184,7 +109,6 @@ class LightningClassifier(L.LightningModule):
                  lr_scheduler_base='torch',
                  lr_scheduler_kwargs: dict = None,
                  lr_scheduler_config: dict = None,
-                 use_cutmix_or_mixup: bool = False,
                  cutmix_or_mixup_alpha: float = 1,
                  cutmix_or_mixeup_prob: float = 0.0,
                  pretrained: bool = True):
@@ -201,9 +125,8 @@ class LightningClassifier(L.LightningModule):
             model = model_class(model_weights, pretrained=pretrained,
                                 num_classes=output_features)
 
-        self.use_cutmix_or_mixup = use_cutmix_or_mixup
         self.cutmix_or_mixeup_prob = cutmix_or_mixeup_prob
-        if self.use_cutmix_or_mixup:
+        if self.cutmix_or_mixeup_prob > 0:
             cutmix = v2.CutMix(num_classes=output_features,
                                alpha=cutmix_or_mixup_alpha)
             mixup = v2.MixUp(num_classes=output_features,
@@ -282,8 +205,7 @@ class LightningClassifier(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        if self.use_cutmix_or_mixup and \
-                torch.rand(1).item() >= self.cutmix_or_mixeup_prob:
+        if torch.rand(1).item() >= self.cutmix_or_mixeup_prob:
             x, y = self.cutmix_or_mixup(x, y)
         output = self.model(x)
         loss = self.loss_fn.to(x.device)(output, y)
