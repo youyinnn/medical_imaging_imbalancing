@@ -1,5 +1,5 @@
 trainer:
-  default_root_dir: ./logs/timm_mixer_224_128_2/
+  default_root_dir: ./logs/timm_mixer_224_128_2_a/
 model:
   lr: 0.0004
   optimizer_kwargs: { weight_decay: 0.0001 }
