@@ -205,7 +205,8 @@ class LightningClassifier(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        if torch.rand(1).item() >= self.cutmix_or_mixup_prob:
+        if self.cutmix_or_mixup_prob > 0 and \
+                torch.rand(1).item() >= self.cutmix_or_mixup_prob:
             x, y = self.cutmix_or_mixup(x, y)
         output = self.model(x)
         loss = self.loss_fn.to(x.device)(output, y)
