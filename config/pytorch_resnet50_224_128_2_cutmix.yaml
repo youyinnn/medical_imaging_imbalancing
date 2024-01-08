@@ -1,7 +1,7 @@
 trainer:
   default_root_dir: ./logs/pt_resnet50_224_128_2_cutmix/
 model:
-  use_cutmix_or_mixup: true
+  cutmix_or_mixup_prob: 0.5
 data:
   img_size: 224
 lr_tuner:

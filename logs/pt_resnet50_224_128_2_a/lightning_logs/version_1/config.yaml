@@ -39,22 +39,29 @@ trainer:
   plugins: null
   sync_batchnorm: false
   reload_dataloaders_every_n_epochs: 0
-  default_root_dir: ./logs/pt_resnet50_32_128_2/
+  default_root_dir: ./logs/pt_resnet50_224_128_2_a/
 model:
   model_key: pytorch_resnet50
   output_features: 100
-  lr: 0.0004756815356796254
+  lr: 0.0004
   prog_bar: false
   loss_fn_key: CrossEntropyLoss
   loss_fn_kwargs: {}
   optimizer_key: Adam
-  optimizer_kwargs: {}
-  lr_scheduler_key: null
-  lr_scheduler_base: torch
-  lr_scheduler_kwargs: null
+  optimizer_kwargs:
+    weight_decay: 0.0001
+  lr_scheduler_key: CosineLRScheduler
+  lr_scheduler_base: timm
+  lr_scheduler_kwargs:
+    warmup_t: 3
+    warmup_lr_init: 1.0e-05
+    lr_min: 1.0e-08
+    cycle_decay: 0.1
+    t_initial: 50
   lr_scheduler_config: null
   use_cutmix_or_mixup: false
   cutmix_or_mixup_alpha: 1.0
+  cutmix_or_mixeup_prob: 0.0
   pretrained: true
 data:
   data_dir: ~/ml_data/cifar-100
@@ -63,8 +70,9 @@ data:
   val_batch_size: null
   test_batch_size: null
   train_size_ratio: 0.8
-  data_loader_kwargs: null
-  img_size: 32
+  data_loader_kwargs:
+    num_workers: 8
+  img_size: 224
   img_size_w: null
   img_size_h: null
   hflip: 0.5
@@ -72,5 +80,5 @@ data:
   transform: []
   target_transform: null
 lr_tuner:
-  num_training_multiple: 2
+  num_training_multiple: 1
 ckpt_path: null
