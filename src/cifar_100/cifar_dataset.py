@@ -118,7 +118,8 @@ class CIFAR100DataModule(L.LightningDataModule):
             num_workers=0,
         )
 
-        self.seed = int(os.environ["PL_GLOBAL_SEED"])
+        self.seed = int(os.environ.get("PL_GLOBAL_SEED") if os.environ.get(
+            "PL_GLOBAL_SEED") is not None else 42)
 
     def prepare_data(self):
         # download the data

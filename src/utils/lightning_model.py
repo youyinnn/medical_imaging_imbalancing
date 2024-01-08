@@ -111,6 +111,7 @@ class LightningClassifier(L.LightningModule):
                  lr_scheduler_config: dict = None,
                  cutmix_or_mixup_alpha: float = 1,
                  cutmix_or_mixup_prob: float = 0.0,
+                 cutmix_only: bool = False,
                  pretrained: bool = True):
         super().__init__()
 
@@ -126,12 +127,16 @@ class LightningClassifier(L.LightningModule):
                                 num_classes=output_features)
 
         self.cutmix_or_mixup_prob = cutmix_or_mixup_prob
+        self.cutmix_only = cutmix_only
         if self.cutmix_or_mixup_prob > 0:
             cutmix = v2.CutMix(num_classes=output_features,
                                alpha=cutmix_or_mixup_alpha)
-            mixup = v2.MixUp(num_classes=output_features,
-                             alpha=cutmix_or_mixup_alpha)
-            self.cutmix_or_mixup = v2.RandomChoice([cutmix, mixup])
+            if not self.cutmix_only:
+                mixup = v2.MixUp(num_classes=output_features,
+                                 alpha=cutmix_or_mixup_alpha)
+                self.cutmix_or_mixup = v2.RandomChoice([cutmix, mixup])
+            else:
+                self.cutmix_or_mixup = cutmix
 
         self.model = model
         self.lr = lr
