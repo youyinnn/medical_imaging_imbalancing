@@ -186,6 +186,7 @@ class LightningClassifier(L.LightningModule):
                  lr_scheduler_config: dict = None,
                  use_cutmix_or_mixup: bool = False,
                  cutmix_or_mixup_alpha: float = 1,
+                 cutmix_or_mixeup_prob: float = 0.0,
                  pretrained: bool = True):
         super().__init__()
 
@@ -201,6 +202,7 @@ class LightningClassifier(L.LightningModule):
                                 num_classes=output_features)
 
         self.use_cutmix_or_mixup = use_cutmix_or_mixup
+        self.cutmix_or_mixeup_prob = cutmix_or_mixeup_prob
         if self.use_cutmix_or_mixup:
             cutmix = v2.CutMix(num_classes=output_features,
                                alpha=cutmix_or_mixup_alpha)
@@ -280,7 +282,8 @@ class LightningClassifier(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        if self.use_cutmix_or_mixup:
+        if self.use_cutmix_or_mixup and \
+                torch.rand(1).item() >= self.cutmix_or_mixeup_prob:
             x, y = self.cutmix_or_mixup(x, y)
         output = self.model(x)
         loss = self.loss_fn.to(x.device)(output, y)
