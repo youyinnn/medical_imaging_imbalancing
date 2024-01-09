@@ -11,6 +11,7 @@ from sklearn.metrics import f1_score, accuracy_score, top_k_accuracy_score
 import timm
 from timm.scheduler import tanh_lr, cosine_lr, plateau_lr, step_lr
 from torchvision.transforms import v2
+from utils.pytorch_helper import X_Aug
 
 
 def pytorch_resnet_fine_tuning(model, output_features):
@@ -76,13 +77,13 @@ class MyLightningCLI(LightningCLI):
         from pathlib import Path
         home = str(Path.home())
         tk_path = os.path.join(home, 'autodl_tk')
-        if os.path.exists(tk_path):
+        if os.path.exists(tk_path) and not self.config.fit.trainer.fast_dev_run:
             print("Token exist")
             return tk_path
 
     def after_fit(self):
         tk_path = self.get_autodl_tk()
-        if tk_path is not None:
+        if tk_path is not None and not self.config.fit.trainer.fast_dev_run:
             with open(tk_path, 'r') as f:
                 import requests
                 headers = {"Authorization": f.read()}
@@ -112,6 +113,8 @@ class LightningClassifier(L.LightningModule):
                  cutmix_or_mixup_alpha: float = 1,
                  cutmix_or_mixup_prob: float = 0.0,
                  cutmix_only: bool = False,
+                 x_aug_prob: float = 0.0,
+                 x_aug_kwargs: dict = {},
                  pretrained: bool = True):
         super().__init__()
 
@@ -125,18 +128,6 @@ class LightningClassifier(L.LightningModule):
         if model_key.startswith('timm_'):
             model = model_class(model_weights, pretrained=pretrained,
                                 num_classes=output_features)
-
-        self.cutmix_or_mixup_prob = cutmix_or_mixup_prob
-        self.cutmix_only = cutmix_only
-        if self.cutmix_or_mixup_prob > 0:
-            cutmix = v2.CutMix(num_classes=output_features,
-                               alpha=cutmix_or_mixup_alpha)
-            if not self.cutmix_only:
-                mixup = v2.MixUp(num_classes=output_features,
-                                 alpha=cutmix_or_mixup_alpha)
-                self.cutmix_or_mixup = v2.RandomChoice([cutmix, mixup])
-            else:
-                self.cutmix_or_mixup = cutmix
 
         self.model = model
         self.lr = lr
@@ -168,25 +159,42 @@ class LightningClassifier(L.LightningModule):
 
             if self.lr_scheduler_config is None:
                 self.lr_scheduler_config = {
-                    "interval": "epoch",
+                    # "interval": "epoch",
                     # How many epochs/steps should pass between calls to
                     # `scheduler.step()`. 1 corresponds to updating the learning
                     # rate after every epoch/step.
-                    "frequency": 1,
+                    # "frequency": 1,
                     # Metric to to monitor for schedulers like `ReduceLROnPlateau`
-                    "monitor": "val_loss",
+                    # "monitor": "val_loss",
                     # If set to `True`, will enforce that the value specified 'monitor'
                     # is available when the scheduler is updated, thus stopping
                     # training if not found. If set to `False`, it will only produce a warning
-                    "strict": True,
+                    # "strict": True,
                     # If using the `LearningRateMonitor` callback to monitor the
                     # learning rate progress, this keyword can be used to specify
                     # a custom logged name
-                    "name": None,
+                    # "name": None,
                 }
 
         self.prog_bar = prog_bar
         self.output_features = output_features
+
+        self.x_aug_prob = x_aug_prob
+        self.x_aug_kwargs = x_aug_kwargs
+        if self.x_aug_prob > 0:
+            self.x_aug = X_Aug(self.model, **x_aug_kwargs)
+
+        self.cutmix_or_mixup_prob = cutmix_or_mixup_prob
+        self.cutmix_only = cutmix_only
+        if self.cutmix_or_mixup_prob > 0:
+            cutmix = v2.CutMix(num_classes=output_features,
+                               alpha=cutmix_or_mixup_alpha)
+            if not self.cutmix_only:
+                mixup = v2.MixUp(num_classes=output_features,
+                                 alpha=cutmix_or_mixup_alpha)
+                self.cutmix_or_mixup = v2.RandomChoice([cutmix, mixup])
+            else:
+                self.cutmix_or_mixup = cutmix
 
     def forward(self, x):
         return self.model(x)
@@ -210,9 +218,12 @@ class LightningClassifier(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        if self.cutmix_or_mixup_prob > 0 and \
+        if self.cutmix_or_mixup_prob > 0.0 and \
                 torch.rand(1).item() >= self.cutmix_or_mixup_prob:
             x, y = self.cutmix_or_mixup(x, y)
+        if self.x_aug_prob > 0.0 and \
+                torch.rand(1).item() >= self.x_aug_prob:
+            x, y = self.x_aug(batch)
         output = self.model(x)
         loss = self.loss_fn.to(x.device)(output, y)
         self.eval_metrics('train', batch, batch_idx, output, loss)

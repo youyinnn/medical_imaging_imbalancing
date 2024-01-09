@@ -1,0 +1,16 @@
+trainer:
+  default_root_dir: ./logs/pt_resnet50_32_128_2_a_xaug/
+model:
+  lr: 0.0004
+  optimizer_kwargs: { weight_decay: 0.0001 }
+  lr_scheduler_base: timm
+  lr_scheduler_key: CosineLRScheduler
+  lr_scheduler_kwargs:
+    warmup_t: 3
+    warmup_lr_init: 0.00001
+    lr_min: 0.00000001
+    cycle_decay: 0.1
+    t_initial: 50
+  x_aug_prob: 0.5
+data:
+  img_size: 32

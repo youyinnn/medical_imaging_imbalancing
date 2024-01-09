@@ -7,7 +7,7 @@ import torch
 from torchvision import datasets
 from torchvision.transforms import v2
 from torch.utils.data import DataLoader
-from src.utils.pytorch_helper import init_transform
+from utils.pytorch_helper import init_transform
 
 
 def to_float(y):
